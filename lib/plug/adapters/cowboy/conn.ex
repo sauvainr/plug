@@ -68,7 +68,8 @@ defmodule Plug.Adapters.Cowboy.Conn do
     # otherwise cowboy will attempt to load the
     # whole length at once.
     {limit, opts} = Keyword.pop(opts, :length, 8_000_000)
-    {:ok, limit, acc, req} = parse_multipart(Request.part(req), limit, opts, [], callback)
+    read_timeout = Keyword.get(opts, :read_timeout, 5_000)
+    {:ok, limit, acc, req} = parse_multipart(Request.part(req, [read_timeout: read_timeout]), limit, opts, [], callback)
 
     params = Enum.reduce(acc, %{}, &Plug.Conn.Query.decode_pair/2)
 
@@ -92,13 +93,14 @@ defmodule Plug.Adapters.Cowboy.Conn do
   ## Multipart
 
   defp parse_multipart({:ok, headers, req}, limit, opts, acc, callback) when limit >= 0 do
+    read_timeout = Keyword.get(opts, :read_timeout, 5_000)
     case callback.(headers) do
       {:binary, name} ->
         {:ok, limit, body, req} =
           parse_multipart_body(Request.part_body(req, opts), limit, opts, "")
 
         Plug.Conn.Utils.validate_utf8!(body, "multipart body")
-        parse_multipart(Request.part(req), limit, opts, [{name, body}|acc], callback)
+        parse_multipart(Request.part(req, [read_timeout: read_timeout]), limit, opts, [{name, body}|acc], callback)
 
       {:file, name, path, %Plug.Upload{} = uploaded} ->
         {:ok, file} = File.open(path, [:write, :binary, :delayed_write, :raw])
@@ -107,10 +109,10 @@ defmodule Plug.Adapters.Cowboy.Conn do
           parse_multipart_file(Request.part_body(req, opts), limit, opts, file)
 
         :ok = File.close(file)
-        parse_multipart(Request.part(req), limit, opts, [{name, uploaded}|acc], callback)
+        parse_multipart(Request.part(req, [read_timeout: read_timeout]), limit, opts, [{name, uploaded}|acc], callback)
 
       :skip ->
-        parse_multipart(Request.part(req), limit, opts, acc, callback)
+        parse_multipart(Request.part(req, [read_timeout: read_timeout]), limit, opts, acc, callback)
     end
   end
 
