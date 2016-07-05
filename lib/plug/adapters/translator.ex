@@ -12,6 +12,11 @@ defmodule Plug.Adapters.Translator do
   The `translate/4` function expected by custom Logger translators.
   """
   def translate(min_level, :error, :format,
+                {~c"Ranch listener" ++ _, [ref, stream, streamid, pid, reason, _stacktrace]}) do
+    translate_ranch(min_level, ref, stream, streamid, pid, reason)
+  end
+
+  def translate(min_level, :error, :format,
                 {~c"Ranch listener" ++ _, [ref, protocol, pid, reason]}) do
     translate_ranch(min_level, ref, protocol, pid, reason)
   end
@@ -36,6 +41,23 @@ defmodule Plug.Adapters.Translator do
 
   defp translate_ranch(_min_level, ref, protocol, pid, reason) do
     {:ok, ["Ranch protocol ", inspect(pid), " (", inspect(protocol),
+           ") of listener ", inspect(ref), " terminated\n" |
+           Exception.format(:exit, reason, [])]}
+  end
+
+  defp translate_ranch(min_level, _ref, stream, _streamid, _pid,
+                       {reason, {mod, :call, [%Plug.Conn{} = conn, _opts]}}) do
+    if non_500_exception?(reason) do
+      :skip
+    else
+      {:ok, [inspect(stream), " running ", inspect(mod), " terminated\n",
+             conn_info(min_level, conn) |
+             Exception.format(:exit, reason, [])]}
+    end
+  end
+
+  defp translate_ranch(_min_level, ref, stream, streamid, _pid, reason) do
+    {:ok, ["Ranch protocol ", inspect(stream), " (", inspect(streamid),
            ") of listener ", inspect(ref), " terminated\n" |
            Exception.format(:exit, reason, [])]}
   end

@@ -153,7 +153,12 @@ defmodule Plug.Adapters.Cowboy do
         raise "could not start the cowboy application. Please ensure it is listed " <>
               "as a dependency both in deps and application in your mix.exs"
     end
-    apply(:cowboy, :"start_#{scheme}", args(scheme, plug, opts, cowboy_options))
+    start = case scheme do
+      :http  -> :start_clear
+      :https -> :start_tls
+      other  -> :erlang.error({:badarg, [other]})
+    end
+    apply(:cowboy, start, args(scheme, plug, opts, cowboy_options))
   end
 
   defp normalize_cowboy_options(cowboy_options, :http) do
@@ -178,7 +183,12 @@ defmodule Plug.Adapters.Cowboy do
 
     dispatch = :cowboy_router.compile(dispatch)
     {extra_options, transport_options} = Keyword.split(opts, @protocol_options)
-    protocol_options = [env: [dispatch: dispatch]] ++ protocol_options ++ extra_options
+    protocol_options = %{
+      env: %{
+        dispatch: dispatch
+      }
+    }
+    |> Map.merge(:maps.from_list(protocol_options ++ extra_options))
 
     [ref, acceptors, initial_transport_options ++ transport_options, protocol_options]
   end

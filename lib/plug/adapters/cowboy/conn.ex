@@ -4,15 +4,17 @@ defmodule Plug.Adapters.Cowboy.Conn do
 
   alias :cowboy_req, as: Request
 
-  def conn(req, transport) do
-    {path, req} = Request.path req
-    {host, req} = Request.host req
-    {port, req} = Request.port req
-    {meth, req} = Request.method req
-    {hdrs, req} = Request.headers req
-    {qs, req}   = Request.qs req
-    {peer, req} = Request.peer req
+  def conn(req) do
+    path = Request.path req
+    host = Request.host req
+    port = Request.port req
+    meth = Request.method req
+    hdrs = Request.headers req
+    qs   = Request.qs req
+    peer = Request.peer req
     {remote_ip, _} = peer
+
+    req = Map.put(req, :plug_read_body, false)
 
     %Plug.Conn{
       adapter: {__MODULE__, req},
@@ -24,14 +26,15 @@ defmodule Plug.Adapters.Cowboy.Conn do
       port: port,
       remote_ip: remote_ip,
       query_string: qs,
-      req_headers: hdrs,
+      req_headers: to_headers_list(hdrs),
       request_path: path,
-      scheme: scheme(transport)
+      scheme: String.to_atom(Request.scheme(req))
    }
   end
 
   def send_resp(req, status, headers, body) do
-    {:ok, req} = Request.reply(status, headers, body, req)
+    headers = to_headers_map(headers)
+    :ok = Request.reply(status, headers, body, req)
     {:ok, nil, req}
   end
 
@@ -44,14 +47,17 @@ defmodule Plug.Adapters.Cowboy.Conn do
         is_integer(length) -> length
       end
 
-    body_fun = fn(socket, transport) -> transport.sendfile(socket, path, offset, length) end
+    body = {:sendfile, offset, length, path}
 
-    {:ok, req} = Request.reply(status, headers, Request.set_resp_body_fun(length, body_fun, req))
+    headers = to_headers_map(headers)
+
+    :ok = Request.reply(status, headers, body, req)
     {:ok, nil, req}
   end
 
   def send_chunked(req, status, headers) do
-    {:ok, req} = Request.chunked_reply(status, headers, req)
+    headers = to_headers_map(headers)
+    req = Request.chunked_reply(status, headers, req)
     {:ok, nil, req}
   end
 
@@ -59,8 +65,12 @@ defmodule Plug.Adapters.Cowboy.Conn do
     Request.chunk(body, req)
   end
 
-  def read_req_body(req, opts \\ []) do
-    Request.body(req, opts)
+  def read_req_body(req, opts \\ [])
+  def read_req_body(req = %{plug_read_body: false}, opts) do
+    Request.read_body(%{req | plug_read_body: true}, opts)
+  end
+  def read_req_body(req, _opts) do
+    {:ok, "", req}
   end
 
   def parse_req_multipart(req, opts, callback) do
@@ -81,12 +91,25 @@ defmodule Plug.Adapters.Cowboy.Conn do
 
   ## Helpers
 
-  defp scheme(:tcp), do: :http
-  defp scheme(:ssl), do: :https
-
   defp split_path(path) do
     segments = :binary.split(path, "/", [:global])
     for segment <- segments, segment != "", do: segment
+  end
+
+  defp to_headers_list(headers) when is_list(headers) do
+    headers
+  end
+
+  defp to_headers_list(headers) when is_map(headers) do
+    :maps.to_list(headers)
+  end
+
+  defp to_headers_map(headers) when is_list(headers) do
+    :maps.from_list(headers)
+  end
+
+  defp to_headers_map(headers) when is_map(headers) do
+    headers
   end
 
   ## Multipart

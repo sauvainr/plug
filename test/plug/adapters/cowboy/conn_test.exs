@@ -312,34 +312,58 @@ defmodule Plug.Adapters.Cowboy.ConnTest do
     send_resp(conn, 200, "OK")
   end
 
+  def http2(conn) do
+    assert conn.scheme == :https
+    send_resp(conn, 200, "OK")
+  end
+
   @https_options [
     port: 8002, password: "cowboy",
     keyfile: Path.expand("../../../fixtures/ssl/key.pem", __DIR__),
     certfile: Path.expand("../../../fixtures/ssl/cert.pem", __DIR__)
   ]
 
-  test "https" do
+  test "https and http2" do
     {:ok, _pid} = Plug.Adapters.Cowboy.https __MODULE__, [], @https_options
     ssl_options = [ssl_options: [cacertfile: @https_options[:certfile]]]
     assert {:ok, 200, _headers, client} = :hackney.get("https://127.0.0.1:8002/https", [], "", ssl_options)
     assert {:ok, "OK"} = :hackney.body(client)
     :hackney.close(client)
+    assert {:ok, pid} = :gun.open('127.0.0.1', 8002, %{
+      protocols: [:http2],
+      transport: :ssl,
+      transport_opts: [cacertfile: @https_options[:certfile]]
+    })
+    assert {:ok, :http2} = :gun.await_up(pid)
+    ref = :gun.get(pid, "/http2", [])
+    assert {:response, :nofin, 200, _headers} = :gun.await(pid, ref)
+    assert {:ok, "OK"} = :gun.await_body(pid, ref)
+    :gun.close(pid)
+    :gun.flush(pid)
   after
     :ok = Plug.Adapters.Cowboy.shutdown __MODULE__.HTTPS
   end
 
   ## Helpers
 
-  defp request(:head = verb, path) do
-    {:ok, status, headers} =
-      :hackney.request(verb, "http://127.0.0.1:8001" <> path, [], "", [])
-    {status, headers, nil}
-  end
-  defp request(verb, path, headers \\ [], body \\ "") do
-    {:ok, status, headers, client} =
-      :hackney.request(verb, "http://127.0.0.1:8001" <> path, headers, body, [])
-    {:ok, body} = :hackney.body(client)
-    :hackney.close(client)
-    {status, headers, body}
+  defp request(verb, path, headers \\ [], body \\ "", retries \\ 5)
+  defp request(verb, path, headers, body, retries) do
+    # NOTE: hackney can hang if the endpoint has recently crashed,
+    #       give it a few milliseconds to come back up first
+    :timer.sleep(25)
+    case :hackney.request(verb, "http://127.0.0.1:8001" <> path, headers, body, []) do
+      {:ok, status, headers} ->
+        {status, headers, nil}
+      {:ok, status, headers, client} ->
+        {:ok, body} = :hackney.body(client)
+        :hackney.close(client)
+        {status, headers, body}
+      {:error, :closed} ->
+        if retries <= 0 do
+          raise ":hackney.request/5 failed due to {:error, :closed}"
+        else
+          request(verb, path, headers, body, retries - 1)
+        end
+    end
   end
 end
