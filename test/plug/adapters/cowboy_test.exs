@@ -60,14 +60,12 @@ defmodule Plug.Adapters.CowboyTest do
   test "builds child specs" do
     args = [Plug.Adapters.CowboyTest.HTTP,
             100,
-            :ranch_tcp,
             [port: 4000, max_connections: 16384],
-            :cowboy_protocol,
             %{env: %{dispatch: @dispatch}}]
 
     assert child_spec(:http, __MODULE__, [], []) ==
            {{:ranch_listener_sup, Plug.Adapters.CowboyTest.HTTP},
-            {:ranch_listener_sup, :start_link, args},
+            {:cowboy, :start_clear, args},
             :permanent,
             :infinity,
             :supervisor,

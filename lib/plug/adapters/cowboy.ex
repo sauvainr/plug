@@ -132,11 +132,17 @@ defmodule Plug.Adapters.Cowboy do
   """
   def child_spec(scheme, plug, opts, cowboy_options \\ []) do
     [ref, nb_acceptors, trans_opts, proto_opts] = args(scheme, plug, opts, cowboy_options)
-    ranch_module = case scheme do
-      :http  -> :ranch_tcp
-      :https -> :ranch_ssl
+    cowboy_function = case scheme do
+      :http  -> :start_clear
+      :https -> :start_tls
     end
-    :ranch.child_spec(ref, nb_acceptors, ranch_module, trans_opts, :cowboy_protocol, proto_opts)
+    {
+      {:ranch_listener_sup, ref},
+      {:cowboy, cowboy_function, [
+        ref, nb_acceptors, trans_opts, proto_opts
+      ]},
+      :permanent, :infinity, :supervisor, [:ranch_listener_sup]
+    }
   end
 
   ## Helpers
