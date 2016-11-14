@@ -65,8 +65,11 @@ defmodule Plug.Adapters.Cowboy.Conn do
     Request.chunk(body, req)
   end
 
-  def read_req_body(req, opts \\ [])
-  def read_req_body(req = %{plug_read_body: false}, opts) do
+  def read_req_body(req, opts \\ %{})
+  def read_req_body(req, opts) when is_list(opts) do
+    read_req_body(req, Enum.into(opts, %{}))
+  end
+  def read_req_body(req = %{plug_read_body: false}, opts) when is_map(opts) do
     Request.read_body(%{req | plug_read_body: true}, opts)
   end
   def read_req_body(req, _opts) do
